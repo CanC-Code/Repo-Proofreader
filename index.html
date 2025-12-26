@@ -1,60 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GitHub Repo Proofreader</title>
 
-<!-- ///// made by CanC-Code / CCVO -->
-<!-- Purpose: Browser-based GitHub repository proofreader -->
+<!-- Styles -->
+<link rel="stylesheet" href="style.css">
 
-<style>
-body {
-    background: #0e0e0e;
-    color: #e0e0e0;
-    font-family: monospace;
-    margin: 0;
-    padding: 12px;
-}
-
-input, button {
-    background: #1b1b1b;
-    color: #fff;
-    border: 1px solid #333;
-    padding: 6px 10px;
-    margin-right: 6px;
-}
-
-#output {
-    white-space: pre-wrap;
-    margin-top: 12px;
-    font-size: 13px;
-}
-
-.error {
-    color: #ff6b6b;
-}
-
-.ok {
-    color: #7dff7d;
-}
-</style>
 </head>
-
 <body>
 
-<h2>GitHub Repo Proofreader</h2>
+<header>
+    <h1>GitHub Repo Proofreader</h1>
+    <p>Scan public GitHub repositories for HTML, JavaScript, and CSS errors</p>
+</header>
 
-<input id="repoInput" placeholder="CanC-Code/Hyper-Worm or full GitHub URL" size="40">
-<button id="scanBtn">Scan Repo</button>
+<main>
 
-<div id="output"></div>
+    <div id="explorer-ui" class="input-container">
+        <input
+            type="text"
+            id="repoInput"
+            placeholder="Enter GitHub repo (owner/repo or full URL)"
+        >
+        <button id="scanBtn">Scan Repository</button>
+    </div>
 
-<!-- ===== Parsers ===== -->
+    <div id="output"></div>
 
-<!-- Full unminified Babel Standalone -->
+</main>
+
+<!-- =========================
+     Local Embedded Parsers
+     ========================= -->
+
+<!-- Babel Standalone (unminified) -->
 <script src="libs/babel.js"></script>
 
-<!-- ===== App Logic ===== -->
+<!-- Proofreader logic -->
 <script src="proofreader.js"></script>
 
 </body>

@@ -1,6 +1,8 @@
-// Global model to hold all files
-//
+///// proofreader.js
+///// Author: CCVO
+///// Purpose: Multi-file JS/HTML/CSS proofreader for GitHub repos
 
+// Global model to hold all files
 window.__repoFiles = {
     html: {},
     js: {},
@@ -9,12 +11,10 @@ window.__repoFiles = {
 
 // --- Public function to process a file ---
 function proofreadFile(path, content) {
-    // Save content in global model
     if (path.endsWith(".html")) window.__repoFiles.html[path] = content;
     else if (path.endsWith(".js")) window.__repoFiles.js[path] = content;
     else if (path.endsWith(".css")) window.__repoFiles.css[path] = content;
 
-    // Return immediate syntax issues for this file
     return getSyntaxIssues(path, content);
 }
 
@@ -35,9 +35,7 @@ function getSyntaxIssues(path, content) {
             const parser = new DOMParser();
             const doc = parser.parseFromString(content, "text/html");
             const parseErrors = doc.querySelectorAll("parsererror");
-            if (parseErrors.length) {
-                issues.push(`HTML Parse Error: ${parseErrors[0].textContent}`);
-            }
+            if (parseErrors.length) issues.push(`HTML Parse Error: ${parseErrors[0].textContent}`);
         } catch (err) {
             issues.push(`HTML Parse Exception: ${err.message}`);
         }
@@ -45,7 +43,6 @@ function getSyntaxIssues(path, content) {
 
     if (path.endsWith(".css")) {
         try {
-            // Simple CSS parsing: detect unmatched braces
             let stack = [];
             for (let i = 0; i < content.length; i++) {
                 if (content[i] === "{") stack.push("{");
@@ -67,7 +64,7 @@ function getSyntaxIssues(path, content) {
 function runCrossFileAnalysis() {
     const issues = [];
 
-    // --- HTML checks ---
+    // HTML checks
     const allIDs = new Set();
     const allClasses = new Set();
     for (const path in window.__repoFiles.html) {
@@ -75,25 +72,27 @@ function runCrossFileAnalysis() {
         const parser = new DOMParser();
         const doc = parser.parseFromString(content, "text/html");
 
-        // Check IDs for duplicates
+        // IDs
         const ids = Array.from(doc.querySelectorAll("[id]")).map(el => el.id);
         ids.forEach(id => {
             if (allIDs.has(id)) issues.push(`${path}: Duplicate HTML ID '${id}'`);
             else allIDs.add(id);
         });
 
-        // Track classes for cross-file CSS check
+        // Classes
         const classes = Array.from(doc.querySelectorAll("[class]"))
             .map(el => el.className.split(/\s+/))
             .flat();
         classes.forEach(cls => allClasses.add(cls));
 
-        // Check linked scripts and styles
+        // Scripts
         const scripts = Array.from(doc.querySelectorAll("script[src]")).map(el => el.getAttribute("src"));
         scripts.forEach(src => {
             if (!window.__repoFiles.js[src] && !window.__repoFiles.js[src.replace(/^\.\//,"")])
                 issues.push(`${path}: Missing JS file referenced: ${src}`);
         });
+
+        // Styles
         const links = Array.from(doc.querySelectorAll("link[rel='stylesheet']")).map(el => el.getAttribute("href"));
         links.forEach(href => {
             if (!window.__repoFiles.css[href] && !window.__repoFiles.css[href.replace(/^\.\//,"")])
@@ -101,7 +100,7 @@ function runCrossFileAnalysis() {
         });
     }
 
-    // --- JS cross-file checks ---
+    // JS cross-file checks
     const definedFunctions = {};
     for (const path in window.__repoFiles.js) {
         const content = window.__repoFiles.js[path];
@@ -116,7 +115,6 @@ function runCrossFileAnalysis() {
     for (const path in window.__repoFiles.js) {
         const content = window.__repoFiles.js[path];
         const ast = esprima.parseScript(content, { tolerant: true });
-        // Check function calls
         traverseAST(ast, node => {
             if (node.type === "CallExpression" && node.callee.type === "Identifier") {
                 const fn = node.callee.name;
@@ -125,15 +123,13 @@ function runCrossFileAnalysis() {
         });
     }
 
-    // --- CSS cross-file checks ---
+    // CSS cross-file checks
     const cssSelectors = new Set();
     for (const path in window.__repoFiles.css) {
         const content = window.__repoFiles.css[path];
         const regex = /\.([a-zA-Z0-9_-]+)/g;
         let m;
-        while ((m = regex.exec(content)) !== null) {
-            cssSelectors.add(m[1]);
-        }
+        while ((m = regex.exec(content)) !== null) cssSelectors.add(m[1]);
     }
 
     allClasses.forEach(cls => {
@@ -143,7 +139,7 @@ function runCrossFileAnalysis() {
     return issues;
 }
 
-// --- Utility: simple AST traversal ---
+// AST traversal
 function traverseAST(node, cb) {
     cb(node);
     for (const key in node) {
@@ -155,8 +151,5 @@ function traverseAST(node, cb) {
     }
 }
 
-// --- Exported for script.js ---
-window.proofreader = {
-    proofreadFile,
-    runCrossFileAnalysis
-};
+// Export
+window.proofreader = { proofreadFile, runCrossFileAnalysis };

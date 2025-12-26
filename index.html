@@ -1,41 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
 <title>GitHub Repo Proofreader</title>
-<link rel="stylesheet" href="style.css">
-<!-- Prism.js for syntax highlighting -->
-<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet"/>
 
-<!-- Local Esprima for JS parsing -->
-<script src="libs/esprima.js"></script>
+<!-- ///// made by CanC-Code / CCVO -->
+<!-- Purpose: Browser-based GitHub repository proofreader -->
+
+<style>
+body {
+    background: #0e0e0e;
+    color: #e0e0e0;
+    font-family: monospace;
+    margin: 0;
+    padding: 12px;
+}
+
+input, button {
+    background: #1b1b1b;
+    color: #fff;
+    border: 1px solid #333;
+    padding: 6px 10px;
+    margin-right: 6px;
+}
+
+#output {
+    white-space: pre-wrap;
+    margin-top: 12px;
+    font-size: 13px;
+}
+
+.error {
+    color: #ff6b6b;
+}
+
+.ok {
+    color: #7dff7d;
+}
+</style>
 </head>
+
 <body>
-<header>
-    <h1>GitHub Repo Proofreader</h1>
-    <p>Browse and proofread any GitHub repository for errors and cross-file issues</p>
-</header>
 
-<main>
-    <div id="explorer-ui" class="input-container">
-        <input type="text" id="repoInput" placeholder="Enter GitHub repo (owner/repo or full URL)">
-        <button id="loadBtn">Load Repository</button>
-    </div>
+<h2>GitHub Repo Proofreader</h2>
 
-    <div id="repoInfo"></div>
-    <div id="fileTree"></div>
-    <div id="proofreaderResults"></div>
-</main>
+<input id="repoInput" placeholder="CanC-Code/Hyper-Worm or full GitHub URL" size="40">
+<button id="scanBtn">Scan Repo</button>
 
-<!-- Prism.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-clike.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+<div id="output"></div>
 
+<!-- ===== Parsers ===== -->
+
+<!-- Full unminified Babel Standalone -->
+<script src="libs/babel.js"></script>
+
+<!-- ===== App Logic ===== -->
 <script src="proofreader.js"></script>
-<script src="script.js"></script>
+
 </body>
 </html>

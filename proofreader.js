@@ -1,16 +1,31 @@
 ///// made by CanC-Code / CCVO
 ///// Purpose: Proofread HTML, JS, and CSS from GitHub repositories
-///// Parser: Babel Standalone (browser-safe, ESNext compatible)
+///// Parser: Babel Standalone (browser-compatible)
 
 const output = document.getElementById("output");
 const scanBtn = document.getElementById("scanBtn");
 const repoInput = document.getElementById("repoInput");
 
-scanBtn.onclick = () => {
-    const raw = repoInput.value.trim();
-    if (!raw) return;
+/* ======================
+   Input + Auto-load
+   ====================== */
 
-    const repo = extractRepo(raw);
+scanBtn.onclick = () => startScan(repoInput.value);
+
+window.addEventListener("load", () => {
+    const hash = decodeURIComponent(window.location.hash.slice(1));
+    if (hash) {
+        repoInput.value = hash;
+        startScan(hash);
+    }
+});
+
+/* ======================
+   Core Logic
+   ====================== */
+
+function startScan(rawInput) {
+    const repo = extractRepo(rawInput);
     if (!repo) {
         logError("Invalid repository input.");
         return;
@@ -18,12 +33,16 @@ scanBtn.onclick = () => {
 
     output.textContent = "";
     proofreadRepo(repo);
-};
+}
 
 function extractRepo(input) {
+    if (!input) return null;
+
     const urlMatch = input.match(/github\.com\/([^\/]+\/[^\/]+)/i);
     if (urlMatch) return urlMatch[1];
-    if (input.includes("/")) return input;
+
+    if (input.includes("/")) return input.trim();
+
     return null;
 }
 
@@ -33,6 +52,7 @@ async function proofreadRepo(ownerRepo) {
     try {
         const repoRes = await fetch(`https://api.github.com/repos/${ownerRepo}`);
         if (!repoRes.ok) throw new Error("Failed to fetch repository info.");
+
         const repoData = await repoRes.json();
         const branch = repoData.default_branch || "main";
 
@@ -40,6 +60,7 @@ async function proofreadRepo(ownerRepo) {
             `https://api.github.com/repos/${ownerRepo}/git/trees/${branch}?recursive=1`
         );
         if (!treeRes.ok) throw new Error("Failed to fetch repository tree.");
+
         const treeData = await treeRes.json();
 
         for (const item of treeData.tree) {
@@ -65,13 +86,9 @@ async function proofreadFile(ownerRepo, branch, path) {
 
         const content = await res.text();
 
-        if (path.endsWith(".js")) {
-            parseJS(content, path);
-        } else if (path.endsWith(".html")) {
-            parseHTML(content, path);
-        } else if (path.endsWith(".css")) {
-            parseCSS(content, path);
-        }
+        if (path.endsWith(".js")) parseJS(content, path);
+        else if (path.endsWith(".html")) parseHTML(content, path);
+        else if (path.endsWith(".css")) parseCSS(content, path);
 
     } catch (err) {
         logError(`${path}: ${err.message}`);
@@ -79,7 +96,7 @@ async function proofreadFile(ownerRepo, branch, path) {
 }
 
 /* ======================
-   JavaScript Parsing
+   Parsers
    ====================== */
 
 function parseJS(code, path) {
@@ -88,6 +105,10 @@ function parseJS(code, path) {
             ast: true,
             code: false,
             sourceType: "module",
+            parserOpts: {
+                allowReturnOutsideFunction: true,
+                errorRecovery: false
+            },
             plugins: [
                 "jsx",
                 "classProperties",
@@ -105,14 +126,9 @@ function parseJS(code, path) {
     }
 }
 
-/* ======================
-   HTML Parsing
-   ====================== */
-
 function parseHTML(html, path) {
     try {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
+        const doc = new DOMParser().parseFromString(html, "text/html");
         if (doc.querySelector("parsererror")) {
             logError(`HTML Parse Error in ${path}`);
         }
@@ -120,10 +136,6 @@ function parseHTML(html, path) {
         logError(`HTML Error in ${path}:\n${err.message}`);
     }
 }
-
-/* ======================
-   CSS Parsing
-   ====================== */
 
 function parseCSS(css, path) {
     try {

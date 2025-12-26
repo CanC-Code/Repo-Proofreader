@@ -1,155 +1,149 @@
-///// proofreader.js
-///// Author: CCVO
-///// Purpose: Multi-file JS/HTML/CSS proofreader for GitHub repos
+///// made by CanC-Code / CCVO
+///// Purpose: Proofread HTML, JS, and CSS from GitHub repositories
+///// Uses: Babel Standalone (full parser, ESNext compatible)
 
-// Global model to hold all files
-window.__repoFiles = {
-    html: {},
-    js: {},
-    css: {}
+const output = document.getElementById("output");
+const scanBtn = document.getElementById("scanBtn");
+const repoInput = document.getElementById("repoInput");
+
+scanBtn.onclick = () => {
+    const raw = repoInput.value.trim();
+    if (!raw) return;
+
+    const repo = extractRepo(raw);
+    if (!repo) {
+        logError("Invalid repository input.");
+        return;
+    }
+
+    output.textContent = "";
+    proofreadRepo(repo);
 };
 
-// --- Public function to process a file ---
-function proofreadFile(path, content) {
-    if (path.endsWith(".html")) window.__repoFiles.html[path] = content;
-    else if (path.endsWith(".js")) window.__repoFiles.js[path] = content;
-    else if (path.endsWith(".css")) window.__repoFiles.css[path] = content;
-
-    return getSyntaxIssues(path, content);
+function extractRepo(input) {
+    const urlMatch = input.match(/github\.com\/([^\/]+\/[^\/]+)/i);
+    if (urlMatch) return urlMatch[1];
+    if (input.includes("/")) return input;
+    return null;
 }
 
-// --- Syntax checks for individual files ---
-function getSyntaxIssues(path, content) {
-    const issues = [];
+async function proofreadRepo(ownerRepo) {
+    log(`Fetching repository: ${ownerRepo}`);
 
-    if (path.endsWith(".js")) {
-        try {
-            esprima.parseScript(content, { tolerant: true });
-        } catch (err) {
-            issues.push(`JS Syntax Error: ${err.message}`);
+    try {
+        const repoRes = await fetch(`https://api.github.com/repos/${ownerRepo}`);
+        if (!repoRes.ok) throw new Error("Repo fetch failed");
+        const repoData = await repoRes.json();
+        const branch = repoData.default_branch || "main";
+
+        const treeRes = await fetch(
+            `https://api.github.com/repos/${ownerRepo}/git/trees/${branch}?recursive=1`
+        );
+        if (!treeRes.ok) throw new Error("Tree fetch failed");
+        const treeData = await treeRes.json();
+
+        for (const item of treeData.tree) {
+            if (item.type !== "blob") continue;
+            await proofreadFile(ownerRepo, branch, item.path);
         }
-    }
 
-    if (path.endsWith(".html")) {
-        try {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(content, "text/html");
-            const parseErrors = doc.querySelectorAll("parsererror");
-            if (parseErrors.length) issues.push(`HTML Parse Error: ${parseErrors[0].textContent}`);
-        } catch (err) {
-            issues.push(`HTML Parse Exception: ${err.message}`);
-        }
-    }
+        log("Proofreading complete.", "ok");
 
-    if (path.endsWith(".css")) {
-        try {
-            let stack = [];
-            for (let i = 0; i < content.length; i++) {
-                if (content[i] === "{") stack.push("{");
-                else if (content[i] === "}") {
-                    if (stack.length === 0) issues.push(`CSS unmatched closing brace at char ${i}`);
-                    else stack.pop();
-                }
-            }
-            if (stack.length > 0) issues.push(`CSS unmatched opening brace(s)`);
-        } catch (err) {
-            issues.push(`CSS Parse Exception: ${err.message}`);
-        }
+    } catch (err) {
+        logError(err.message);
     }
-
-    return issues;
 }
 
-// --- Cross-file analysis ---
-function runCrossFileAnalysis() {
-    const issues = [];
+async function proofreadFile(ownerRepo, branch, path) {
+    log(`Proofreading ${path}...`);
 
-    // HTML checks
-    const allIDs = new Set();
-    const allClasses = new Set();
-    for (const path in window.__repoFiles.html) {
-        const content = window.__repoFiles.html[path];
+    try {
+        const res = await fetch(
+            `https://raw.githubusercontent.com/${ownerRepo}/${branch}/${path}`
+        );
+        if (!res.ok) return;
+
+        const content = await res.text();
+
+        if (path.endsWith(".js")) {
+            parseJS(content, path);
+        } else if (path.endsWith(".html")) {
+            parseHTML(content, path);
+        } else if (path.endsWith(".css")) {
+            parseCSS(content, path);
+        }
+
+    } catch (err) {
+        logError(`${path}: ${err.message}`);
+    }
+}
+
+/* ==========================
+   JavaScript Parsing (Babel)
+   ========================== */
+
+function parseJS(code, path) {
+    try {
+        Babel.parse(code, {
+            sourceType: "module",
+            allowAwaitOutsideFunction: true,
+            plugins: [
+                "jsx",
+                "classProperties",
+                "classPrivateProperties",
+                "classPrivateMethods",
+                "optionalChaining",
+                "nullishCoalescingOperator",
+                "dynamicImport",
+                "topLevelAwait",
+                "objectRestSpread"
+            ]
+        });
+    } catch (err) {
+        logError(`JS Syntax Error in ${path}:\n${err.message}`);
+    }
+}
+
+/* ==========================
+   HTML Parsing
+   ========================== */
+
+function parseHTML(html, path) {
+    try {
         const parser = new DOMParser();
-        const doc = parser.parseFromString(content, "text/html");
-
-        // IDs
-        const ids = Array.from(doc.querySelectorAll("[id]")).map(el => el.id);
-        ids.forEach(id => {
-            if (allIDs.has(id)) issues.push(`${path}: Duplicate HTML ID '${id}'`);
-            else allIDs.add(id);
-        });
-
-        // Classes
-        const classes = Array.from(doc.querySelectorAll("[class]"))
-            .map(el => el.className.split(/\s+/))
-            .flat();
-        classes.forEach(cls => allClasses.add(cls));
-
-        // Scripts
-        const scripts = Array.from(doc.querySelectorAll("script[src]")).map(el => el.getAttribute("src"));
-        scripts.forEach(src => {
-            if (!window.__repoFiles.js[src] && !window.__repoFiles.js[src.replace(/^\.\//,"")])
-                issues.push(`${path}: Missing JS file referenced: ${src}`);
-        });
-
-        // Styles
-        const links = Array.from(doc.querySelectorAll("link[rel='stylesheet']")).map(el => el.getAttribute("href"));
-        links.forEach(href => {
-            if (!window.__repoFiles.css[href] && !window.__repoFiles.css[href.replace(/^\.\//,"")])
-                issues.push(`${path}: Missing CSS file referenced: ${href}`);
-        });
-    }
-
-    // JS cross-file checks
-    const definedFunctions = {};
-    for (const path in window.__repoFiles.js) {
-        const content = window.__repoFiles.js[path];
-        const ast = esprima.parseScript(content, { tolerant: true });
-        ast.body.forEach(node => {
-            if (node.type === "FunctionDeclaration" && node.id && node.id.name) {
-                definedFunctions[node.id.name] = path;
-            }
-        });
-    }
-
-    for (const path in window.__repoFiles.js) {
-        const content = window.__repoFiles.js[path];
-        const ast = esprima.parseScript(content, { tolerant: true });
-        traverseAST(ast, node => {
-            if (node.type === "CallExpression" && node.callee.type === "Identifier") {
-                const fn = node.callee.name;
-                if (!definedFunctions[fn]) issues.push(`${path}: Call to undefined function '${fn}'`);
-            }
-        });
-    }
-
-    // CSS cross-file checks
-    const cssSelectors = new Set();
-    for (const path in window.__repoFiles.css) {
-        const content = window.__repoFiles.css[path];
-        const regex = /\.([a-zA-Z0-9_-]+)/g;
-        let m;
-        while ((m = regex.exec(content)) !== null) cssSelectors.add(m[1]);
-    }
-
-    allClasses.forEach(cls => {
-        if (!cssSelectors.has(cls)) issues.push(`HTML class '${cls}' used but not defined in any CSS`);
-    });
-
-    return issues;
-}
-
-// AST traversal
-function traverseAST(node, cb) {
-    cb(node);
-    for (const key in node) {
-        if (node.hasOwnProperty(key)) {
-            const child = node[key];
-            if (Array.isArray(child)) child.forEach(n => n && typeof n.type === "string" && traverseAST(n, cb));
-            else if (child && typeof child.type === "string") traverseAST(child, cb);
+        const doc = parser.parseFromString(html, "text/html");
+        if (doc.querySelector("parsererror")) {
+            logError(`HTML Parse Error in ${path}`);
         }
+    } catch (err) {
+        logError(`HTML Error in ${path}: ${err.message}`);
     }
 }
 
-// Export
-window.proofreader = { proofreadFile, runCrossFileAnalysis };
+/* ==========================
+   CSS Parsing
+   ========================== */
+
+function parseCSS(css, path) {
+    try {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(css);
+    } catch (err) {
+        logError(`CSS Syntax Error in ${path}:\n${err.message}`);
+    }
+}
+
+/* ==========================
+   Logging
+   ========================== */
+
+function log(msg, cls) {
+    const div = document.createElement("div");
+    div.textContent = msg;
+    if (cls) div.className = cls;
+    output.appendChild(div);
+}
+
+function logError(msg) {
+    log(msg, "error");
+}

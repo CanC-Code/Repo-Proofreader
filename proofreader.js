@@ -1,6 +1,6 @@
 ///// made by CanC-Code / CCVO
 ///// Purpose: Proofread HTML, JS, and CSS from GitHub repositories
-///// Parser: Babel Standalone (browser-compatible)
+///// Parser: Babel Standalone (browser-compatible, ES module safe)
 
 const output = document.getElementById("output");
 const scanBtn = document.getElementById("scanBtn");
@@ -104,22 +104,7 @@ function parseJS(code, path) {
         Babel.transform(code, {
             ast: true,
             code: false,
-            sourceType: "module",
-            parserOpts: {
-                allowReturnOutsideFunction: true,
-                errorRecovery: false
-            },
-            plugins: [
-                "jsx",
-                "classProperties",
-                "classPrivateProperties",
-                "classPrivateMethods",
-                "optionalChaining",
-                "nullishCoalescingOperator",
-                "dynamicImport",
-                "topLevelAwait",
-                "objectRestSpread"
-            ]
+            sourceType: "module"
         });
     } catch (err) {
         logError(`JS Syntax Error in ${path}:\n${err.message}`);

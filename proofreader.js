@@ -1,6 +1,6 @@
 ///// made by CanC-Code / CCVO
 ///// Purpose: Proofread HTML, JS, and CSS from GitHub repositories
-///// Uses: Babel Standalone (full parser, ESNext compatible)
+///// Parser: Babel Standalone (browser-safe, ESNext compatible)
 
 const output = document.getElementById("output");
 const scanBtn = document.getElementById("scanBtn");
@@ -32,14 +32,14 @@ async function proofreadRepo(ownerRepo) {
 
     try {
         const repoRes = await fetch(`https://api.github.com/repos/${ownerRepo}`);
-        if (!repoRes.ok) throw new Error("Repo fetch failed");
+        if (!repoRes.ok) throw new Error("Failed to fetch repository info.");
         const repoData = await repoRes.json();
         const branch = repoData.default_branch || "main";
 
         const treeRes = await fetch(
             `https://api.github.com/repos/${ownerRepo}/git/trees/${branch}?recursive=1`
         );
-        if (!treeRes.ok) throw new Error("Tree fetch failed");
+        if (!treeRes.ok) throw new Error("Failed to fetch repository tree.");
         const treeData = await treeRes.json();
 
         for (const item of treeData.tree) {
@@ -47,7 +47,7 @@ async function proofreadRepo(ownerRepo) {
             await proofreadFile(ownerRepo, branch, item.path);
         }
 
-        log("Proofreading complete.", "ok");
+        log("Proofreading complete.");
 
     } catch (err) {
         logError(err.message);
@@ -78,15 +78,16 @@ async function proofreadFile(ownerRepo, branch, path) {
     }
 }
 
-/* ==========================
-   JavaScript Parsing (Babel)
-   ========================== */
+/* ======================
+   JavaScript Parsing
+   ====================== */
 
 function parseJS(code, path) {
     try {
-        Babel.parse(code, {
+        Babel.transform(code, {
+            ast: true,
+            code: false,
             sourceType: "module",
-            allowAwaitOutsideFunction: true,
             plugins: [
                 "jsx",
                 "classProperties",
@@ -104,9 +105,9 @@ function parseJS(code, path) {
     }
 }
 
-/* ==========================
+/* ======================
    HTML Parsing
-   ========================== */
+   ====================== */
 
 function parseHTML(html, path) {
     try {
@@ -116,13 +117,13 @@ function parseHTML(html, path) {
             logError(`HTML Parse Error in ${path}`);
         }
     } catch (err) {
-        logError(`HTML Error in ${path}: ${err.message}`);
+        logError(`HTML Error in ${path}:\n${err.message}`);
     }
 }
 
-/* ==========================
+/* ======================
    CSS Parsing
-   ========================== */
+   ====================== */
 
 function parseCSS(css, path) {
     try {
@@ -133,17 +134,19 @@ function parseCSS(css, path) {
     }
 }
 
-/* ==========================
+/* ======================
    Logging
-   ========================== */
+   ====================== */
 
-function log(msg, cls) {
+function log(msg) {
     const div = document.createElement("div");
     div.textContent = msg;
-    if (cls) div.className = cls;
     output.appendChild(div);
 }
 
 function logError(msg) {
-    log(msg, "error");
+    const div = document.createElement("div");
+    div.textContent = msg;
+    div.style.color = "#ff6b6b";
+    output.appendChild(div);
 }

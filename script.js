@@ -1,3 +1,7 @@
+///// script.js
+///// Author: CCVO
+///// Purpose: Repository loading and file tree management
+
 const repoInput = document.getElementById("repoInput");
 const loadBtn = document.getElementById("loadBtn");
 const fileTreeContainer = document.getElementById("fileTree");
@@ -74,7 +78,7 @@ function buildTreeList(tree, ownerRepo, branch) {
 
                     // Send file content to proofreader
                     proofreaderResults.appendChild(document.createTextNode(`Proofreading ${tree[key]._path}...\n`));
-                    const issues = proofreadFile(tree[key]._path, content);
+                    const issues = window.proofreader.proofreadFile(tree[key]._path, content);
                     issues.forEach(issue => {
                         proofreaderResults.appendChild(document.createTextNode(issue + "\n"));
                     });

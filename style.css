@@ -1,15 +1,14 @@
-/* style.css */
 body {
-    font-family: system-ui, sans-serif;
+    font-family: Arial, sans-serif;
     margin: 0;
-    background: #0f1115;
-    color: #e6e6e6;
+    background: #f4f4f4;
+    color: #111;
 }
 
 header {
+    background: #24292f;
+    color: #fff;
     padding: 1rem;
-    background: #161a22;
-    border-bottom: 1px solid #333;
     text-align: center;
 }
 
@@ -25,8 +24,8 @@ header p {
 
 main {
     padding: 1rem;
-    max-width: 960px;
-    margin: auto;
+    max-width: 1000px;
+    margin: 0 auto;
 }
 
 .input-container {
@@ -39,36 +38,22 @@ input[type="text"] {
     flex: 1;
     padding: 0.5rem;
     font-size: 1rem;
-    border: 1px solid #444;
-    border-radius: 4px;
-    background: #161a22;
-    color: #e6e6e6;
 }
 
 button {
     padding: 0.5rem 1rem;
     font-size: 1rem;
     cursor: pointer;
-    background: #242a33;
-    color: #e6e6e6;
-    border: 1px solid #444;
-    border-radius: 4px;
-}
-
-button:hover {
-    background: #2d343f;
 }
 
 #output {
-    margin-top: 1rem;
-    background: #111;
-    padding: 1rem;
+    background: #fff;
+    border: 1px solid #ccc;
+    padding: 0.5rem;
     font-family: monospace;
     white-space: pre-wrap;
-    border: 1px solid #333;
     max-height: 70vh;
     overflow-y: auto;
-    border-radius: 4px;
 }
 
 .error {

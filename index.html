@@ -1,29 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GitHub Repo Proofreader</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GitHub Repo Proofreader</title>
 
-<link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-<header>
+  <header>
     <h1>GitHub Repo Proofreader</h1>
     <p>Static analysis for HTML, CSS, and ES Modules (browser-only)</p>
-</header>
+  </header>
 
-<main>
+  <main>
     <div class="input-container">
-        <input id="repoInput" placeholder="owner/repo or GitHub URL" />
-        <button id="scanBtn">Scan Repository</button>
+      <input
+        type="text"
+        id="repoInput"
+        placeholder="Enter GitHub repo (owner/repo or full URL)"
+      >
+      <button id="scanBtn">Scan Repository</button>
     </div>
 
     <div id="output"></div>
-</main>
+  </main>
 
-<script src="libs/babel.min.js"></script>
-<script src="proofreader.js"></script>
+  <!-- Load Babel -->
+  <script src="libs/babel.js"></script>
+
+  <!-- Proofreader logic -->
+  <script src="js/proofreader.js"></script>
+
+  <script>
+    // Handle hash URL auto-load
+    window.addEventListener("load", () => {
+      const hash = decodeURIComponent(window.location.hash.slice(1));
+      if (hash) {
+        const repoInput = document.getElementById("repoInput");
+        repoInput.value = hash;
+        if (window.startScan) window.startScan(hash);
+      }
+    });
+  </script>
 </body>
 </html>

@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GitHub Repo Proofreader</title>
-
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -15,13 +14,20 @@
   </header>
 
   <main>
-    <input id="repoInput" placeholder="owner/repo or GitHub URL" />
-    <button id="scanBtn">Scan</button>
+    <div class="input-container">
+      <input id="repoInput" placeholder="owner/repo or GitHub URL" />
+      <button id="scanBtn">Scan</button>
+    </div>
 
-    <div id="output"></div>
+    <div id="repoInfo"></div>
+    <div id="fileTree"></div>
+    <div id="proofreaderResults"></div>
   </main>
 
+  <!-- Babel Standalone -->
   <script src="libs/babel.min.js"></script>
+
+  <!-- Proofreader logic -->
   <script src="proofreader.js"></script>
 </body>
 </html>

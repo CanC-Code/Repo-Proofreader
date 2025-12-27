@@ -1,37 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GitHub Repo Proofreader</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GitHub Repo Proofreader</title>
 
-<link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-
-<header>
+  <header>
     <h1>GitHub Repo Proofreader</h1>
-    <p>Scan public GitHub repositories for HTML, JavaScript, and CSS errors</p>
-</header>
+    <p>Static analysis for HTML, CSS, and ES Modules (browser-only)</p>
+  </header>
 
-<main>
-    <div id="explorer-ui" class="input-container">
-        <input
-            type="text"
-            id="repoInput"
-            placeholder="Enter GitHub repo (owner/repo or full URL)"
-        >
-        <button id="scanBtn">Scan Repository</button>
-    </div>
+  <main>
+    <input id="repoInput" placeholder="owner/repo or GitHub URL" />
+    <button id="scanBtn">Scan</button>
 
     <div id="output"></div>
-</main>
+  </main>
 
-<!-- Local embedded Babel (UNMINIFIED, standalone build) -->
-<script src="libs/babel.js"></script>
-
-<!-- Proofreader logic -->
-<script src="proofreader.js"></script>
-
+  <script src="libs/babel.min.js"></script>
+  <script src="proofreader.js"></script>
 </body>
 </html>

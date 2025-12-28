@@ -1,11 +1,15 @@
+///// proofreader.js
+///// Author: CCVO / CanC-Code
+///// Purpose: GitHub Repo Proofreader with multi-layer AST parsing
+
 const output = document.getElementById("output");
 const scanBtn = document.getElementById("scanBtn");
 const repoInput = document.getElementById("repoInput");
 
-// Maps to track exports/imports
+// Maps to track modules
 const moduleExportsMap = {};
-const moduleImportsMap = {};
 const moduleContentMap = {};
+const moduleImportsMap = {}; // track imports for verification
 
 /* ======================
    Hash + Input Handling
@@ -20,7 +24,6 @@ function checkHash() {
 
 window.addEventListener("load", checkHash);
 window.addEventListener("hashchange", checkHash);
-
 scanBtn.onclick = () => startScan(repoInput.value.trim());
 
 /* ======================
@@ -40,10 +43,7 @@ function getRepoFromInput(input) {
    ====================== */
 async function startScan(rawInput) {
     const ownerRepo = getRepoFromInput(rawInput);
-    if (!ownerRepo) {
-        logError("Invalid repository input.");
-        return;
-    }
+    if (!ownerRepo) return logError("Invalid repository input.");
     output.textContent = "";
     await proofreadRepo(ownerRepo);
 }
@@ -60,7 +60,6 @@ async function proofreadRepo(ownerRepo) {
         if (!treeRes.ok) throw new Error("Failed to fetch repository tree.");
         const treeData = await treeRes.json();
 
-        // Fetch all files
         for (const item of treeData.tree) {
             if (item.type !== "blob") continue;
             const path = item.path;
@@ -71,19 +70,8 @@ async function proofreadRepo(ownerRepo) {
             } catch {}
         }
 
-        // Proofread
         for (const path in moduleContentMap) {
             await proofreadFile(path);
-        }
-
-        // Cross-check imports
-        for (const file in moduleImportsMap) {
-            for (const imp of moduleImportsMap[file]) {
-                const targetExports = moduleExportsMap[imp.source];
-                if (!targetExports || !imp.names.every(n => targetExports.has(n))) {
-                    logError(`❌ ${file}: imports '${imp.names.join(", ")}' from '${imp.source}' which is not exported`);
-                }
-            }
         }
 
         log("Proofreading complete.");
@@ -97,82 +85,61 @@ async function proofreadFile(path) {
     const content = moduleContentMap[path];
     if (!content) return;
 
-    if (path.endsWith(".js")) parseJS(content, path);
+    if (path.endsWith(".js")) await parseJSMulti(content, path);
     else if (path.endsWith(".html")) parseHTML(content, path);
     else if (path.endsWith(".css")) parseCSS(content, path);
 }
 
 /* ======================
-   JS Parser: Babel primary, Esprima fallback
+   JS Multi-layer Parser
    ====================== */
-function parseJS(code, path) {
-    let ast;
+async function parseJSMulti(code, path) {
+    // Try Babel first
     try {
-        ast = Babel.transform(code, { ast: true, code: false, sourceType: "module" }).ast;
-        processAST(ast, path);
-    } catch (err) {
-        log(`Babel parse failed for ${path}, falling back to Esprima.`);
-        try {
-            ast = esprima.parseModule(code, { tolerant: true });
-            processASTEsprima(ast, path);
-        } catch (e) {
-            logError(`Cannot parse ${path}, skipped: ${e.message}`);
-        }
-    }
-}
-
-function processAST(ast, path) {
-    const exportedSymbols = new Set();
-    const importedItems = [];
-
-    try {
-        Babel.traverse(ast, {
-            ExportNamedDeclaration({ node }) {
-                if (node.declaration) {
-                    if (node.declaration.id) exportedSymbols.add(node.declaration.id.name);
-                    else if (node.declaration.declarations) {
-                        node.declaration.declarations.forEach(d => exportedSymbols.add(d.id.name));
-                    }
-                }
-                if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
-            },
-            ExportDefaultDeclaration() { exportedSymbols.add("default"); },
-            ImportDeclaration({ node }) {
-                let sourcePath = node.source.value;
-                if (sourcePath.startsWith(".")) {
-                    const segments = path.split("/").slice(0, -1);
-                    const relative = sourcePath.split("/");
-                    for (const seg of relative) {
-                        if (seg === ".") continue;
-                        else if (seg === "..") segments.pop();
-                        else segments.push(seg);
-                    }
-                    sourcePath = segments.join("/");
-                    if (!sourcePath.endsWith(".js")) sourcePath += ".js";
-                }
-                const names = node.specifiers.map(s => s.imported ? s.imported.name : "default");
-                importedItems.push({ source: sourcePath, names });
-            }
-        });
+        const ast = Babel.transform(code, { ast: true, code: false, sourceType: "module" }).ast;
+        traverseAST(ast, path);
+        return;
     } catch (err) {
         log(`AST traverse failed for ${path}, some imports/exports may be missing.`);
     }
 
-    moduleExportsMap[path] = exportedSymbols;
-    moduleImportsMap[path] = importedItems;
+    // Fallback to Esprima
+    try {
+        const ast = esprima.parseModule(code, { tolerant: true, jsx: true });
+        traverseASTEsprima(ast, path);
+        return;
+    } catch (err) {
+        log(`Esprima parse failed for ${path}, attempting Acorn/Recast fallback.`);
+    }
+
+    // Tertiary fallback to Acorn/Recast
+    try {
+        const ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "module" });
+        traverseASTAcorn(ast, path);
+    } catch (err) {
+        logError(`Cannot parse ${path}, skipped: ${err.message}`);
+    }
 }
 
-function processASTEsprima(ast, path) {
+/* ======================
+   AST Traversal Helpers
+   ====================== */
+function traverseAST(ast, path) {
     const exportedSymbols = new Set();
-    const importedItems = [];
+    const imports = [];
 
-    for (const node of ast.body) {
-        if (node.type === "ExportNamedDeclaration") {
-            if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
+    Babel.traverse(ast, {
+        ExportNamedDeclaration({ node }) {
+            if (node.declaration) {
+                if (node.declaration.id) exportedSymbols.add(node.declaration.id.name);
+                else if (node.declaration.declarations) {
+                    node.declaration.declarations.forEach(d => exportedSymbols.add(d.id.name));
+                }
+            }
             if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
-        }
-        if (node.type === "ExportDefaultDeclaration") exportedSymbols.add("default");
-        if (node.type === "ImportDeclaration") {
+        },
+        ExportDefaultDeclaration() { exportedSymbols.add("default"); },
+        ImportDeclaration({ node }) {
             let sourcePath = node.source.value;
             if (sourcePath.startsWith(".")) {
                 const segments = path.split("/").slice(0, -1);
@@ -185,13 +152,62 @@ function processASTEsprima(ast, path) {
                 sourcePath = segments.join("/");
                 if (!sourcePath.endsWith(".js")) sourcePath += ".js";
             }
-            const names = node.specifiers.map(s => s.imported ? s.imported.name : "default");
-            importedItems.push({ source: sourcePath, names });
+
+            node.specifiers.forEach(s => {
+                const importedName = s.imported ? s.imported.name : "default";
+                if (moduleExportsMap[sourcePath] && !moduleExportsMap[sourcePath].has(importedName)) {
+                    logError(`❌ ${path}: imports '${importedName}' from '${node.source.value}' (${sourcePath}) which is not exported`);
+                }
+            });
+        }
+    });
+
+    moduleExportsMap[path] = exportedSymbols;
+    moduleImportsMap[path] = imports;
+}
+
+function traverseASTEsprima(ast, path) {
+    const exportedSymbols = new Set();
+    const imports = [];
+
+    for (const node of ast.body) {
+        if (node.type === "ExportNamedDeclaration") {
+            if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
+            if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
+        }
+        if (node.type === "ExportDefaultDeclaration") exportedSymbols.add("default");
+        if (node.type === "ImportDeclaration") {
+            imports.push({
+                source: node.source.value,
+                names: node.specifiers.map(s => s.imported ? s.imported.name : "default")
+            });
         }
     }
 
     moduleExportsMap[path] = exportedSymbols;
-    moduleImportsMap[path] = importedItems;
+    moduleImportsMap[path] = imports;
+}
+
+function traverseASTAcorn(ast, path) {
+    const exportedSymbols = new Set();
+    const imports = [];
+
+    for (const node of ast.body) {
+        if (node.type === "ExportNamedDeclaration") {
+            if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
+            if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
+        }
+        if (node.type === "ExportDefaultDeclaration") exportedSymbols.add("default");
+        if (node.type === "ImportDeclaration") {
+            imports.push({
+                source: node.source.value,
+                names: node.specifiers.map(s => s.imported ? s.imported.name : "default")
+            });
+        }
+    }
+
+    moduleExportsMap[path] = exportedSymbols;
+    moduleImportsMap[path] = imports;
 }
 
 /* ======================
@@ -200,9 +216,7 @@ function processASTEsprima(ast, path) {
 function parseHTML(html, path) {
     try {
         const doc = new DOMParser().parseFromString(html, "text/html");
-        if (doc.querySelector("parsererror")) {
-            logError(`HTML Parse Error in ${path}`);
-        }
+        if (doc.querySelector("parsererror")) logError(`HTML Parse Error in ${path}`);
     } catch (err) {
         logError(`HTML Error in ${path}:\n${err.message}`);
     }

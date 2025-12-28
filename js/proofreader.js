@@ -2,7 +2,9 @@ const output = document.getElementById("output");
 const scanBtn = document.getElementById("scanBtn");
 const repoInput = document.getElementById("repoInput");
 
+// Maps to track exports/imports
 const moduleExportsMap = {};
+const moduleImportsMap = {};
 const moduleContentMap = {};
 
 /* ======================
@@ -58,6 +60,7 @@ async function proofreadRepo(ownerRepo) {
         if (!treeRes.ok) throw new Error("Failed to fetch repository tree.");
         const treeData = await treeRes.json();
 
+        // Fetch all files
         for (const item of treeData.tree) {
             if (item.type !== "blob") continue;
             const path = item.path;
@@ -68,8 +71,19 @@ async function proofreadRepo(ownerRepo) {
             } catch {}
         }
 
+        // Proofread
         for (const path in moduleContentMap) {
             await proofreadFile(path);
+        }
+
+        // Cross-check imports
+        for (const file in moduleImportsMap) {
+            for (const imp of moduleImportsMap[file]) {
+                const targetExports = moduleExportsMap[imp.source];
+                if (!targetExports || !imp.names.every(n => targetExports.has(n))) {
+                    logError(`❌ ${file}: imports '${imp.names.join(", ")}' from '${imp.source}' which is not exported`);
+                }
+            }
         }
 
         log("Proofreading complete.");
@@ -89,61 +103,95 @@ async function proofreadFile(path) {
 }
 
 /* ======================
-   JS Parser - Manual AST Walk
+   JS Parser: Babel primary, Esprima fallback
    ====================== */
 function parseJS(code, path) {
     let ast;
     try {
         ast = Babel.transform(code, { ast: true, code: false, sourceType: "module" }).ast;
+        processAST(ast, path);
     } catch (err) {
-        logWarning(`Cannot parse ${path} (skipped): ${err.message}`);
-        return;
+        log(`Babel parse failed for ${path}, falling back to Esprima.`);
+        try {
+            ast = esprima.parseModule(code, { tolerant: true });
+            processASTEsprima(ast, path);
+        } catch (e) {
+            logError(`Cannot parse ${path}, skipped: ${e.message}`);
+        }
+    }
+}
+
+function processAST(ast, path) {
+    const exportedSymbols = new Set();
+    const importedItems = [];
+
+    try {
+        Babel.traverse(ast, {
+            ExportNamedDeclaration({ node }) {
+                if (node.declaration) {
+                    if (node.declaration.id) exportedSymbols.add(node.declaration.id.name);
+                    else if (node.declaration.declarations) {
+                        node.declaration.declarations.forEach(d => exportedSymbols.add(d.id.name));
+                    }
+                }
+                if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
+            },
+            ExportDefaultDeclaration() { exportedSymbols.add("default"); },
+            ImportDeclaration({ node }) {
+                let sourcePath = node.source.value;
+                if (sourcePath.startsWith(".")) {
+                    const segments = path.split("/").slice(0, -1);
+                    const relative = sourcePath.split("/");
+                    for (const seg of relative) {
+                        if (seg === ".") continue;
+                        else if (seg === "..") segments.pop();
+                        else segments.push(seg);
+                    }
+                    sourcePath = segments.join("/");
+                    if (!sourcePath.endsWith(".js")) sourcePath += ".js";
+                }
+                const names = node.specifiers.map(s => s.imported ? s.imported.name : "default");
+                importedItems.push({ source: sourcePath, names });
+            }
+        });
+    } catch (err) {
+        log(`AST traverse failed for ${path}, some imports/exports may be missing.`);
     }
 
-    const exportsSet = new Set();
-    const importsArr = [];
+    moduleExportsMap[path] = exportedSymbols;
+    moduleImportsMap[path] = importedItems;
+}
 
-    for (const node of ast.program.body) {
-        // Export handling
+function processASTEsprima(ast, path) {
+    const exportedSymbols = new Set();
+    const importedItems = [];
+
+    for (const node of ast.body) {
         if (node.type === "ExportNamedDeclaration") {
-            if (node.declaration?.id) exportsSet.add(node.declaration.id.name);
-            if (node.declaration?.declarations) {
-                node.declaration.declarations.forEach(d => exportsSet.add(d.id.name));
-            }
-            if (node.specifiers) node.specifiers.forEach(s => exportsSet.add(s.exported.name));
+            if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
+            if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
         }
-        if (node.type === "ExportDefaultDeclaration") exportsSet.add("default");
-
-        // Import handling
+        if (node.type === "ExportDefaultDeclaration") exportedSymbols.add("default");
         if (node.type === "ImportDeclaration") {
-            const sourcePath = node.source.value;
-            node.specifiers.forEach(s => {
-                const importedName = s.imported ? s.imported.name : "default";
-                importsArr.push({ source: sourcePath, name: importedName });
-            });
+            let sourcePath = node.source.value;
+            if (sourcePath.startsWith(".")) {
+                const segments = path.split("/").slice(0, -1);
+                const relative = sourcePath.split("/");
+                for (const seg of relative) {
+                    if (seg === ".") continue;
+                    else if (seg === "..") segments.pop();
+                    else segments.push(seg);
+                }
+                sourcePath = segments.join("/");
+                if (!sourcePath.endsWith(".js")) sourcePath += ".js";
+            }
+            const names = node.specifiers.map(s => s.imported ? s.imported.name : "default");
+            importedItems.push({ source: sourcePath, names });
         }
     }
 
-    moduleExportsMap[path] = exportsSet;
-
-    // Check imports
-    for (const imp of importsArr) {
-        if (imp.source.startsWith(".")) {
-            const segments = path.split("/").slice(0, -1);
-            const relative = imp.source.split("/");
-            for (const seg of relative) {
-                if (seg === ".") continue;
-                else if (seg === "..") segments.pop();
-                else segments.push(seg);
-            }
-            let resolved = segments.join("/");
-            if (!resolved.endsWith(".js")) resolved += ".js";
-
-            if (moduleExportsMap[resolved] && !moduleExportsMap[resolved].has(imp.name)) {
-                logError(`❌ ${path}: imports '${imp.name}' from '${imp.source}' (${resolved}) which is not exported`);
-            }
-        }
-    }
+    moduleExportsMap[path] = exportedSymbols;
+    moduleImportsMap[path] = importedItems;
 }
 
 /* ======================
@@ -152,7 +200,9 @@ function parseJS(code, path) {
 function parseHTML(html, path) {
     try {
         const doc = new DOMParser().parseFromString(html, "text/html");
-        if (doc.querySelector("parsererror")) logError(`HTML Parse Error in ${path}`);
+        if (doc.querySelector("parsererror")) {
+            logError(`HTML Parse Error in ${path}`);
+        }
     } catch (err) {
         logError(`HTML Error in ${path}:\n${err.message}`);
     }
@@ -183,12 +233,5 @@ function logError(msg) {
     const div = document.createElement("div");
     div.textContent = msg;
     div.style.color = "#ff6b6b";
-    output.appendChild(div);
-}
-
-function logWarning(msg) {
-    const div = document.createElement("div");
-    div.textContent = msg;
-    div.style.color = "#ffa500";
     output.appendChild(div);
 }

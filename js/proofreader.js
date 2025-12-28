@@ -94,14 +94,14 @@ async function startScan(rawInput) {
 }
 
 async function proofreadRepo(ownerRepo) {
-    log(`Fetching repository: ${ownerRepo}`);
+    log("Fetching repository: " + ownerRepo);
     try {
-        const repoRes = await fetch(`https://api.github.com/repos/${ownerRepo}`);
+        const repoRes = await fetch("https://api.github.com/repos/" + ownerRepo);
         if (!repoRes.ok) throw new Error("Failed to fetch repository info.");
         const repoData = await repoRes.json();
         const branch = repoData.default_branch || "main";
 
-        const treeRes = await fetch(`https://api.github.com/repos/${ownerRepo}/git/trees/${branch}?recursive=1`);
+        const treeRes = await fetch("https://api.github.com/repos/" + ownerRepo + "/git/trees/" + branch + "?recursive=1");
         if (!treeRes.ok) throw new Error("Failed to fetch repository tree.");
         const treeData = await treeRes.json();
 
@@ -110,7 +110,7 @@ async function proofreadRepo(ownerRepo) {
             if (item.type !== "blob") continue;
             const path = item.path;
             try {
-                const res = await fetch(`https://raw.githubusercontent.com/${ownerRepo}/${branch}/${path}`);
+                const res = await fetch("https://raw.githubusercontent.com/" + ownerRepo + "/" + branch + "/" + path);
                 if (!res.ok) continue;
                 moduleContentMap[path] = await res.text();
             } catch {}
@@ -126,7 +126,7 @@ async function proofreadRepo(ownerRepo) {
         let issueCount = 0;
         for (const path in moduleImportIssues) {
             moduleImportIssues[path].forEach(issue => {
-                logError(`❌ ${path}: ${issue}`);
+                logError("❌ " + path + ": " + issue);
                 issueCount++;
             });
         }
@@ -134,12 +134,12 @@ async function proofreadRepo(ownerRepo) {
         if (issueCount === 0) {
             log("✅ No import/export issues found!");
         } else {
-            log(`\nTotal issues found: ${issueCount}`);
+            log("\nTotal issues found: " + issueCount);
         }
         
         log("\nParsing methods used:");
         for (const path in fileParseMethod) {
-            log(`  ${path}: ${fileParseMethod[path]}`);
+            log("  " + path + ": " + fileParseMethod[path]);
         }
         
         log("\nProofreading complete.");
@@ -153,7 +153,7 @@ async function proofreadFile(path) {
     const content = moduleContentMap[path];
     if (!content) return;
 
-    log(`Proofreading ${path}...`);
+    log("Proofreading " + path + "...");
 
     if (path.endsWith(".js")) await parseJS(content, path);
     else if (path.endsWith(".html")) parseHTML(content, path);
@@ -218,7 +218,7 @@ async function parseJS(code, path) {
         traverseASTRecast(ast, path);
         return;
     } catch (err) {
-        logError(`❌ Cannot parse ${path} with any parser: ${err.message}`);
+        logError("❌ Cannot parse " + path + " with any parser: " + err.message);
         fileParseMethod[path] = "Failed";
     }
 }
@@ -253,7 +253,7 @@ function traverseAST(ast, path) {
                 if (node.source.value.startsWith(".")) {
                     if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(importedName)) {
                         if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
-                        moduleImportIssues[path].push(`imports '${importedName}' from '${node.source.value}' (resolved: ${sourcePath}) which is not exported`);
+                        moduleImportIssues[path].push("imports '" + importedName + "' from '" + node.source.value + "' (resolved: " + sourcePath + ") which is not exported");
                     }
                 }
             });
@@ -293,7 +293,7 @@ function traverseASTEsprima(ast, path) {
             if (imp.source.startsWith(".")) {
                 if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(name)) {
                     if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
-                    moduleImportIssues[path].push(`imports '${name}' from '${imp.source}' (resolved: ${sourcePath}) which is not exported`);
+                    moduleImportIssues[path].push("imports '" + name + "' from '" + imp.source + "' (resolved: " + sourcePath + ") which is not exported");
                 }
             }
         });
@@ -335,7 +335,7 @@ function traverseASTRecast(ast, path) {
             if (imp.source.startsWith(".")) {
                 if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(name)) {
                     if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
-                    moduleImportIssues[path].push(`imports '${name}' from '${imp.source}' (resolved: ${sourcePath}) which is not exported`);
+                    moduleImportIssues[path].push("imports '" + name + "' from '" + imp.source + "' (resolved: " + sourcePath + ") which is not exported");
                 }
             }
         });
@@ -347,10 +347,10 @@ function parseHTML(html, path) {
     try {
         const doc = new DOMParser().parseFromString(html, "text/html");
         if (doc.querySelector("parsererror")) {
-            logError(`HTML Parse Error in ${path}`);
+        logError("HTML Parse Error in " + path);
         }
     } catch (err) { 
-        logError(`HTML Error in ${path}:\n${err.message}`); 
+        logError("HTML Error in " + path + ":\n" + err.message); 
     }
 }
 
@@ -358,7 +358,7 @@ function parseCSS(css, path) {
     try { 
         new CSSStyleSheet().replaceSync(css); 
     } catch (err) { 
-        logError(`CSS Syntax Error in ${path}:\n${err.message}`); 
+        logError("CSS Syntax Error in " + path + ":\n" + err.message); 
     }
 }
 

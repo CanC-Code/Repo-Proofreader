@@ -2,7 +2,6 @@ const output = document.getElementById("output");
 const scanBtn = document.getElementById("scanBtn");
 const repoInput = document.getElementById("repoInput");
 
-// Maps to track modules
 const moduleExportsMap = {};
 const moduleContentMap = {};
 
@@ -59,7 +58,6 @@ async function proofreadRepo(ownerRepo) {
         if (!treeRes.ok) throw new Error("Failed to fetch repository tree.");
         const treeData = await treeRes.json();
 
-        // Fetch all files
         for (const item of treeData.tree) {
             if (item.type !== "blob") continue;
             const path = item.path;
@@ -70,7 +68,6 @@ async function proofreadRepo(ownerRepo) {
             } catch {}
         }
 
-        // Proofread
         for (const path in moduleContentMap) {
             await proofreadFile(path);
         }
@@ -92,53 +89,60 @@ async function proofreadFile(path) {
 }
 
 /* ======================
-   JS Parser + Export/Import check
+   JS Parser - Manual AST Walk
    ====================== */
 function parseJS(code, path) {
+    let ast;
     try {
-        const ast = Babel.transform(code, { ast: true, code: false, sourceType: "module" }).ast;
-
-        const exportedSymbols = new Set();
-        Babel.traverse(ast, {
-            ExportNamedDeclaration({ node }) {
-                if (node.declaration) {
-                    if (node.declaration.id) exportedSymbols.add(node.declaration.id.name);
-                    else if (node.declaration.declarations) {
-                        node.declaration.declarations.forEach(d => exportedSymbols.add(d.id.name));
-                    }
-                }
-                if (node.specifiers) node.specifiers.forEach(s => exportedSymbols.add(s.exported.name));
-            },
-            ExportDefaultDeclaration() { exportedSymbols.add("default"); }
-        });
-        moduleExportsMap[path] = exportedSymbols;
-
-        Babel.traverse(ast, {
-            ImportDeclaration({ node }) {
-                let sourcePath = node.source.value;
-                if (sourcePath.startsWith(".")) {
-                    const segments = path.split("/").slice(0, -1);
-                    const relative = sourcePath.split("/");
-                    for (const seg of relative) {
-                        if (seg === ".") continue;
-                        else if (seg === "..") segments.pop();
-                        else segments.push(seg);
-                    }
-                    sourcePath = segments.join("/");
-                    if (!sourcePath.endsWith(".js")) sourcePath += ".js";
-                }
-
-                node.specifiers.forEach(s => {
-                    const importedName = s.imported ? s.imported.name : "default";
-                    if (moduleExportsMap[sourcePath] && !moduleExportsMap[sourcePath].has(importedName)) {
-                        logError(`❌ ${path}: imports '${importedName}' from '${node.source.value}' (${sourcePath}) which is not exported`);
-                    }
-                });
-            }
-        });
-
+        ast = Babel.transform(code, { ast: true, code: false, sourceType: "module" }).ast;
     } catch (err) {
-        logError(`JS Syntax Error in ${path}:\n${err.message}`);
+        logWarning(`Cannot parse ${path} (skipped): ${err.message}`);
+        return;
+    }
+
+    const exportsSet = new Set();
+    const importsArr = [];
+
+    for (const node of ast.program.body) {
+        // Export handling
+        if (node.type === "ExportNamedDeclaration") {
+            if (node.declaration?.id) exportsSet.add(node.declaration.id.name);
+            if (node.declaration?.declarations) {
+                node.declaration.declarations.forEach(d => exportsSet.add(d.id.name));
+            }
+            if (node.specifiers) node.specifiers.forEach(s => exportsSet.add(s.exported.name));
+        }
+        if (node.type === "ExportDefaultDeclaration") exportsSet.add("default");
+
+        // Import handling
+        if (node.type === "ImportDeclaration") {
+            const sourcePath = node.source.value;
+            node.specifiers.forEach(s => {
+                const importedName = s.imported ? s.imported.name : "default";
+                importsArr.push({ source: sourcePath, name: importedName });
+            });
+        }
+    }
+
+    moduleExportsMap[path] = exportsSet;
+
+    // Check imports
+    for (const imp of importsArr) {
+        if (imp.source.startsWith(".")) {
+            const segments = path.split("/").slice(0, -1);
+            const relative = imp.source.split("/");
+            for (const seg of relative) {
+                if (seg === ".") continue;
+                else if (seg === "..") segments.pop();
+                else segments.push(seg);
+            }
+            let resolved = segments.join("/");
+            if (!resolved.endsWith(".js")) resolved += ".js";
+
+            if (moduleExportsMap[resolved] && !moduleExportsMap[resolved].has(imp.name)) {
+                logError(`❌ ${path}: imports '${imp.name}' from '${imp.source}' (${resolved}) which is not exported`);
+            }
+        }
     }
 }
 
@@ -148,9 +152,7 @@ function parseJS(code, path) {
 function parseHTML(html, path) {
     try {
         const doc = new DOMParser().parseFromString(html, "text/html");
-        if (doc.querySelector("parsererror")) {
-            logError(`HTML Parse Error in ${path}`);
-        }
+        if (doc.querySelector("parsererror")) logError(`HTML Parse Error in ${path}`);
     } catch (err) {
         logError(`HTML Error in ${path}:\n${err.message}`);
     }
@@ -181,5 +183,12 @@ function logError(msg) {
     const div = document.createElement("div");
     div.textContent = msg;
     div.style.color = "#ff6b6b";
+    output.appendChild(div);
+}
+
+function logWarning(msg) {
+    const div = document.createElement("div");
+    div.textContent = msg;
+    div.style.color = "#ffa500";
     output.appendChild(div);
 }

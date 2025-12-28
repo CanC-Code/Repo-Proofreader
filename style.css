@@ -1,3 +1,4 @@
+/* General body */
 body {
     font-family: monospace;
     background: #111;
@@ -7,65 +8,73 @@ body {
 }
 
 header, footer {
-    background: #222;
     padding: 1em;
+    background: #222;
     text-align: center;
 }
 
+header h1 {
+    margin: 0;
+    font-size: 1.8em;
+}
+
+header p, footer p {
+    margin: 0.2em 0 0;
+    font-size: 0.9em;
+    color: #ccc;
+}
+
+/* Main area */
 main {
     padding: 1em;
 }
 
+/* Input container */
 .input-container {
     display: flex;
-    justify-content: center;
-    padding-bottom: 1em;
+    gap: 0.5em;
+    margin-bottom: 1em;
 }
 
-#repoInput {
-    width: 300px;
+.input-container input {
+    flex: 1;
     padding: 0.5em;
     font-size: 1em;
-    border: 1px solid #444;
     background: #222;
     color: #eee;
+    border: 1px solid #555;
+    border-radius: 4px;
 }
 
-#scanBtn {
-    margin-left: 1em;
+.input-container button {
     padding: 0.5em 1em;
     font-size: 1em;
-    cursor: pointer;
-    border: 1px solid #444;
     background: #333;
     color: #eee;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
 }
 
-#scanBtn:hover {
+.input-container button:hover {
     background: #444;
 }
 
+/* Output */
 #output {
-    white-space: pre-wrap;
-    padding: 1em;
-    border-top: 1px solid #333;
-    max-height: 70vh;
-    overflow-y: auto;
     background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 1em;
+    max-height: 60vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-size: 0.95em;
 }
 
-.output-success {
-    color: #4caf50;
+#output div {
+    margin-bottom: 0.25em;
 }
 
-.output-error {
-    color: #ff6b6b;
-}
-
-.output-warn {
-    color: #ffc107;
-}
-
-footer {
-    margin-top: 1em;
+#output div:last-child {
+    margin-bottom: 0;
 }

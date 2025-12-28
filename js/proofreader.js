@@ -16,20 +16,49 @@ const moduleContentMap = {};
 const moduleImportIssues = {};
 const fileParseMethod = {};
 
+// Prevent circular hash updates
+let isScanning = false;
+
 // ----------------------
 // Hash + Input Handling
 // ----------------------
 function checkHash() {
     const hash = decodeURIComponent(window.location.hash.slice(1));
-    if (!hash) return;
-    const repo = hash.replace(/^https?:\/\//, "").replace(/\/$/, "");
-    repoInput.value = repo;
-    startScan(repo);
+    if (!hash || isScanning) return;
+    
+    const repo = hash.replace(/^https?:\/\/github\.com\//, "").replace(/\/$/, "");
+    if (repoInput && repo) {
+        repoInput.value = repo;
+        startScan(repo);
+    }
 }
-window.addEventListener("load", checkHash);
-window.addEventListener("hashchange", checkHash);
 
-scanBtn.onclick = () => startScan(repoInput.value.trim());
+// Only check hash once after DOM is fully loaded
+window.addEventListener("load", () => {
+    checkHash();
+});
+
+// Handle manual hash changes (but not during scans)
+window.addEventListener("hashchange", () => {
+    if (!isScanning) {
+        checkHash();
+    }
+});
+
+scanBtn.onclick = () => {
+    const input = repoInput.value.trim();
+    if (input) {
+        // Update hash without triggering hashchange during scan
+        const repo = getRepoFromInput(input);
+        if (repo) {
+            isScanning = true;
+            window.location.hash = repo;
+            setTimeout(() => {
+                startScan(input);
+            }, 10);
+        }
+    }
+};
 
 // ----------------------
 // URL parsing
@@ -50,6 +79,7 @@ async function startScan(rawInput) {
     const ownerRepo = getRepoFromInput(rawInput);
     if (!ownerRepo) {
         logError("Invalid repository input.");
+        isScanning = false;
         return;
     }
 
@@ -60,6 +90,7 @@ async function startScan(rawInput) {
     Object.keys(fileParseMethod).forEach(k => delete fileParseMethod[k]);
 
     await proofreadRepo(ownerRepo);
+    isScanning = false;
 }
 
 async function proofreadRepo(ownerRepo) {
@@ -85,17 +116,33 @@ async function proofreadRepo(ownerRepo) {
             } catch {}
         }
 
-        // Proofread
+        // Proofread all files first
         for (const path in moduleContentMap) {
             await proofreadFile(path);
         }
 
         // Final summary
         log("\n=== Proofreading Summary ===");
+        let issueCount = 0;
         for (const path in moduleImportIssues) {
-            moduleImportIssues[path].forEach(issue => logError(`❌ ${path}: ${issue}`));
+            moduleImportIssues[path].forEach(issue => {
+                logError(`❌ ${path}: ${issue}`);
+                issueCount++;
+            });
         }
-        log("Proofreading complete.");
+        
+        if (issueCount === 0) {
+            log("✅ No import/export issues found!");
+        } else {
+            log(`\nTotal issues found: ${issueCount}`);
+        }
+        
+        log("\nParsing methods used:");
+        for (const path in fileParseMethod) {
+            log(`  ${path}: ${fileParseMethod[path]}`);
+        }
+        
+        log("\nProofreading complete.");
 
     } catch (err) {
         logError(err.message);
@@ -114,161 +161,205 @@ async function proofreadFile(path) {
 }
 
 // ----------------------
+// Helper: Resolve relative imports
+// ----------------------
+function resolveImportPath(importSource, currentPath) {
+    if (!importSource.startsWith(".")) {
+        return importSource; // External module
+    }
+
+    const currentDir = currentPath.split("/").slice(0, -1);
+    const importParts = importSource.split("/");
+    
+    for (const part of importParts) {
+        if (part === ".") continue;
+        else if (part === "..") currentDir.pop();
+        else currentDir.push(part);
+    }
+    
+    let resolved = currentDir.join("/");
+    
+    // Add .js extension if missing
+    if (!resolved.endsWith(".js") && !resolved.endsWith(".mjs")) {
+        resolved += ".js";
+    }
+    
+    return resolved;
+}
+
+// ----------------------
 // JS Parsing: Babel → Esprima → Acorn/Recast
 // ----------------------
 async function parseJS(code, path) {
+    // Try Babel first
     try {
         const ast = Babel.transform(code, { ast: true, code: false, sourceType: "module" }).ast;
         fileParseMethod[path] = "Babel";
         traverseAST(ast, path);
         return;
     } catch {
-        log(`AST traverse failed for ${path}, some imports/exports may be missing.`);
+        // Babel failed, continue to Esprima
     }
 
+    // Try Esprima
     try {
         const ast = esprima.parseModule(code, { tolerant: true });
         fileParseMethod[path] = "Esprima";
         traverseASTEsprima(ast, path);
         return;
     } catch {
-        log(`Esprima parse failed for ${path}, attempting Acorn/Recast fallback.`);
+        // Esprima failed, continue to Acorn/Recast
     }
 
+    // Try Acorn/Recast
     try {
         const ast = recast.parse(code, { parser: acorn });
         fileParseMethod[path] = "Acorn/Recast";
         traverseASTRecast(ast, path);
-    } catch {
-        logError(`Cannot parse ${path}, skipped.`);
+        return;
+    } catch (err) {
+        logError(`❌ Cannot parse ${path} with any parser: ${err.message}`);
+        fileParseMethod[path] = "Failed";
     }
 }
 
 // AST Traversal Helpers
 function traverseAST(ast, path) {
-    try {
-        const exportedSymbols = new Set();
-        Babel.traverse(ast, {
-            ExportNamedDeclaration({ node }) {
-                if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
-                node.declaration?.declarations?.forEach(d => exportedSymbols.add(d.id.name));
-                node.specifiers?.forEach(s => exportedSymbols.add(s.exported.name));
-            },
-            ExportDefaultDeclaration() { exportedSymbols.add("default"); }
-        });
-        moduleExportsMap[path] = exportedSymbols;
+    const exportedSymbols = new Set();
+    
+    // First pass: collect exports
+    Babel.traverse(ast, {
+        ExportNamedDeclaration({ node }) {
+            if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
+            node.declaration?.declarations?.forEach(d => exportedSymbols.add(d.id.name));
+            node.specifiers?.forEach(s => exportedSymbols.add(s.exported.name));
+        },
+        ExportDefaultDeclaration() { 
+            exportedSymbols.add("default"); 
+        }
+    });
+    
+    moduleExportsMap[path] = exportedSymbols;
 
-        Babel.traverse(ast, {
-            ImportDeclaration({ node }) {
-                let sourcePath = node.source.value;
-                if (sourcePath.startsWith(".")) {
-                    const segments = path.split("/").slice(0, -1);
-                    const relative = sourcePath.split("/");
-                    for (const seg of relative) {
-                        if (seg === ".") continue;
-                        else if (seg === "..") segments.pop();
-                        else segments.push(seg);
-                    }
-                    sourcePath = segments.join("/");
-                    if (!sourcePath.endsWith(".js")) sourcePath += ".js";
-                }
-
-                node.specifiers.forEach(s => {
-                    const importedName = s.imported ? s.imported.name : "default";
+    // Second pass: check imports
+    Babel.traverse(ast, {
+        ImportDeclaration({ node }) {
+            const sourcePath = resolveImportPath(node.source.value, path);
+            
+            node.specifiers.forEach(s => {
+                const importedName = s.imported ? s.imported.name : "default";
+                
+                // Only check if source is a local file
+                if (node.source.value.startsWith(".")) {
                     if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(importedName)) {
                         if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
-                        moduleImportIssues[path].push(`imports '${importedName}' from '${node.source.value}' (${sourcePath}) which is not exported`);
+                        moduleImportIssues[path].push(`imports '${importedName}' from '${node.source.value}' (resolved: ${sourcePath}) which is not exported`);
                     }
-                });
-            }
-        });
-    } catch {
-        log(`AST traverse failed for ${path}, some imports/exports may be missing.`);
-    }
+                }
+            });
+        }
+    });
 }
 
 function traverseASTEsprima(ast, path) {
-    try {
-        const exportedSymbols = new Set();
-        const imports = [];
-        for (const node of ast.body) {
-            if (node.type === "ExportNamedDeclaration") {
-                if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
-                node.specifiers?.forEach(s => exportedSymbols.add(s.exported.name));
+    const exportedSymbols = new Set();
+    const imports = [];
+    
+    // Collect exports and imports
+    for (const node of ast.body) {
+        if (node.type === "ExportNamedDeclaration") {
+            if (node.declaration?.id) exportedSymbols.add(node.declaration.id.name);
+            if (node.declaration?.declarations) {
+                node.declaration.declarations.forEach(d => exportedSymbols.add(d.id.name));
             }
-            if (node.type === "ExportDefaultDeclaration") exportedSymbols.add("default");
-            if (node.type === "ImportDeclaration") {
-                imports.push({ source: node.source.value, names: node.specifiers.map(s => s.imported ? s.imported.name : "default") });
-            }
+            node.specifiers?.forEach(s => exportedSymbols.add(s.exported.name));
         }
-        moduleExportsMap[path] = exportedSymbols;
-        imports.forEach(i => {
-            i.names.forEach(n => {
-                let sourcePath = i.source;
-                if (sourcePath.startsWith(".")) {
-                    const segments = path.split("/").slice(0, -1);
-                    const relative = sourcePath.split("/");
-                    for (const seg of relative) {
-                        if (seg === ".") continue;
-                        else if (seg === "..") segments.pop();
-                        else segments.push(seg);
-                    }
-                    sourcePath = segments.join("/");
-                    if (!sourcePath.endsWith(".js")) sourcePath += ".js";
-                }
-                if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(n)) {
-                    if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
-                    moduleImportIssues[path].push(`imports '${n}' from '${i.source}' (${sourcePath}) which is not exported`);
-                }
-            });
-        });
-    } catch {
-        log(`Esprima traverse failed for ${path}.`);
+        if (node.type === "ExportDefaultDeclaration") {
+            exportedSymbols.add("default");
+        }
+        if (node.type === "ImportDeclaration") {
+            const names = node.specifiers.map(s => s.imported ? s.imported.name : "default");
+            imports.push({ source: node.source.value, names });
+        }
     }
+    
+    moduleExportsMap[path] = exportedSymbols;
+    
+    // Check imports
+    imports.forEach(imp => {
+        const sourcePath = resolveImportPath(imp.source, path);
+        
+        imp.names.forEach(name => {
+            if (imp.source.startsWith(".")) {
+                if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(name)) {
+                    if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
+                    moduleImportIssues[path].push(`imports '${name}' from '${imp.source}' (resolved: ${sourcePath}) which is not exported`);
+                }
+            }
+        });
+    });
 }
 
 function traverseASTRecast(ast, path) {
-    try {
-        const exportedSymbols = new Set();
-        recast.types.visit(ast, {
-            visitExportNamedDeclaration(p) {
-                if (p.node.declaration?.id) exportedSymbols.add(p.node.declaration.id.name);
-                p.node.specifiers?.forEach(s => exportedSymbols.add(s.exported.name));
-                this.traverse(p);
-            },
-            visitExportDefaultDeclaration(p) {
-                exportedSymbols.add("default");
-                this.traverse(p);
-            },
-            visitImportDeclaration(p) {
-                const source = p.node.source.value;
-                p.node.specifiers.forEach(s => {
-                    const importedName = s.imported ? s.imported.name : "default";
-                    if (!moduleExportsMap[source] || !moduleExportsMap[source].has(importedName)) {
-                        if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
-                        moduleImportIssues[path].push(`imports '${importedName}' from '${source}' which is not exported`);
-                    }
-                });
-                this.traverse(p);
+    const exportedSymbols = new Set();
+    const imports = [];
+    
+    recast.types.visit(ast, {
+        visitExportNamedDeclaration(p) {
+            if (p.node.declaration?.id) exportedSymbols.add(p.node.declaration.id.name);
+            if (p.node.declaration?.declarations) {
+                p.node.declaration.declarations.forEach(d => exportedSymbols.add(d.id.name));
+            }
+            p.node.specifiers?.forEach(s => exportedSymbols.add(s.exported.name));
+            this.traverse(p);
+        },
+        visitExportDefaultDeclaration(p) {
+            exportedSymbols.add("default");
+            this.traverse(p);
+        },
+        visitImportDeclaration(p) {
+            const source = p.node.source.value;
+            const names = p.node.specifiers.map(s => s.imported ? s.imported.name : "default");
+            imports.push({ source, names });
+            this.traverse(p);
+        }
+    });
+    
+    moduleExportsMap[path] = exportedSymbols;
+    
+    // Check imports
+    imports.forEach(imp => {
+        const sourcePath = resolveImportPath(imp.source, path);
+        
+        imp.names.forEach(name => {
+            if (imp.source.startsWith(".")) {
+                if (!moduleExportsMap[sourcePath] || !moduleExportsMap[sourcePath].has(name)) {
+                    if (!moduleImportIssues[path]) moduleImportIssues[path] = [];
+                    moduleImportIssues[path].push(`imports '${name}' from '${imp.source}' (resolved: ${sourcePath}) which is not exported`);
+                }
             }
         });
-        moduleExportsMap[path] = exportedSymbols;
-    } catch {
-        log(`Acorn/Recast traverse failed for ${path}.`);
-    }
+    });
 }
 
 // HTML + CSS Parsers
 function parseHTML(html, path) {
     try {
         const doc = new DOMParser().parseFromString(html, "text/html");
-        if (doc.querySelector("parsererror")) logError(`HTML Parse Error in ${path}`);
-    } catch (err) { logError(`HTML Error in ${path}:\n${err.message}`); }
+        if (doc.querySelector("parsererror")) {
+            logError(`HTML Parse Error in ${path}`);
+        }
+    } catch (err) { 
+        logError(`HTML Error in ${path}:\n${err.message}`); 
+    }
 }
 
 function parseCSS(css, path) {
-    try { new CSSStyleSheet().replaceSync(css); }
-    catch (err) { logError(`CSS Syntax Error in ${path}:\n${err.message}`); }
+    try { 
+        new CSSStyleSheet().replaceSync(css); 
+    } catch (err) { 
+        logError(`CSS Syntax Error in ${path}:\n${err.message}`); 
+    }
 }
 
 // Logging
